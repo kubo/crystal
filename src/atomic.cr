@@ -9,8 +9,10 @@ struct Atomic(T)
       # Support integer types, enum types, or char (because it's represented as an integer)
     {% elsif T < Reference || (T.union? && T.union_types.all? { |t| t == Nil || t < Reference }) %}
       # Support reference types, or union types with only nil or reference types
+    {% elsif T < Pointer %}
+      # Support pointer types
     {% else %}
-      {{ raise "Can only create Atomic with primitive integer types, reference types or nilable reference types, not #{T}" }}
+      {{ raise "Can only create Atomic with primitive integer types, reference types, nilable reference types or pointer types, not #{T}" }}
     {% end %}
   end
 
@@ -39,6 +41,10 @@ struct Atomic(T)
       # Use addresses again (but this can't return nil)
       address, success = Ops.cmpxchg(pointerof(@value).as(LibC::SizeT*), LibC::SizeT.new(cmp.as(T).object_id), LibC::SizeT.new(new.as(T).object_id), :sequentially_consistent, :sequentially_consistent)
       {Pointer(T).new(address).as(T), success}
+    {% elsif T < Pointer %}
+      # Use addresses again (but this can't return nil)
+      address, success = Ops.cmpxchg(pointerof(@value).as(LibC::SizeT*), LibC::SizeT.new(cmp.address), LibC::SizeT.new(new.address), :sequentially_consistent, :sequentially_consistent)
+      {typeof(@value).new(address), success}
     {% else %}
       # Otherwise, this is an integer type
       Ops.cmpxchg(pointerof(@value), cmp, new, :sequentially_consistent, :sequentially_consistent)
@@ -160,6 +166,9 @@ struct Atomic(T)
     {% if T.union? && T.union_types.all? { |t| t == Nil || t < Reference } || T < Reference %}
       address = Ops.atomicrmw(:xchg, pointerof(@value).as(LibC::SizeT*), LibC::SizeT.new(value.as(T).object_id), :sequentially_consistent, false)
       Pointer(T).new(address).as(T)
+    {% elsif T < Pointer %}
+      address = Ops.atomicrmw(:xchg, pointerof(@value).as(LibC::SizeT*), LibC::SizeT.new(value.address), :sequentially_consistent, false)
+      typeof(@value).new(address)
     {% else %}
       Ops.atomicrmw(:xchg, pointerof(@value), value, :sequentially_consistent, false)
     {% end %}

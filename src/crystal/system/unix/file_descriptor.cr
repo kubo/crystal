@@ -27,6 +27,9 @@ module Crystal::System::FileDescriptor
     end
   end
 
+  private def system_initialize(fd)
+  end
+
   private def system_blocking?
     flags = fcntl(LibC::F_GETFL)
     !flags.bits_set? LibC::O_NONBLOCK
@@ -153,7 +156,7 @@ module Crystal::System::FileDescriptor
   end
 
   def self.pread(fd, buffer, offset)
-    bytes_read = LibC.pread(fd, buffer, buffer.size, offset)
+    bytes_read = LibC.pread(fd.fd, buffer, buffer.size, offset)
 
     if bytes_read == -1
       raise IO::Error.from_errno "Error reading file"

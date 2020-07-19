@@ -62,7 +62,12 @@ class File
   # It is the caller's responsibility to remove the file when no longer needed.
   def self.tempfile(prefix : String?, suffix : String?, *, dir : String = Dir.tempdir, encoding = nil, invalid = nil)
     fileno, path = Crystal::System::File.mktemp(prefix, suffix, dir)
-    new(path, fileno, blocking: true, encoding: encoding, invalid: invalid)
+    {% if !flag?(:win32) %}
+      new(path, fileno, blocking: true, encoding: encoding, invalid: invalid)
+    {% else %}
+      # file is opened with FILE_FLAG_OVERLAPPED
+      new(path, fileno, blocking: true, encoding: encoding, invalid: invalid, overlapped: true)
+    {% end %}
   end
 
   # Creates a temporary file.

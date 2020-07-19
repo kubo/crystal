@@ -78,9 +78,9 @@ class File < IO::FileDescriptor
 
   # This constructor is provided for subclasses to be able to initialize an
   # `IO::FileDescriptor` with a *path* and *fd*.
-  private def initialize(@path, fd, blocking = false, encoding = nil, invalid = nil)
+  private def initialize(@path, fd, blocking = false, encoding = nil, invalid = nil, **opts)
     self.set_encoding(encoding, invalid: invalid) if encoding
-    super(fd, blocking)
+    super(fd, blocking, **opts)
   end
 
   # Opens the file named by *filename*.
@@ -108,8 +108,13 @@ class File < IO::FileDescriptor
   # In binary file mode, line endings are not converted to CRLF on Windows.
   def self.new(filename : Path | String, mode = "r", perm = DEFAULT_CREATE_PERMISSIONS, encoding = nil, invalid = nil)
     filename = filename.to_s
-    fd = Crystal::System::File.open(filename, mode, perm)
-    new(filename, fd, blocking: true, encoding: encoding, invalid: invalid)
+    {% if !flag?(:win32) %}
+      fd = Crystal::System::File.open(filename, mode, perm)
+      new(filename, fd, blocking: true, encoding: encoding, invalid: invalid)
+    {% else %}
+      fd, overlapped, append = Crystal::System::File.open(filename, mode, perm)
+      new(filename, fd, blocking: true, encoding: encoding, invalid: invalid, overlapped: overlapped, append: append)
+    {% end %}
   end
 
   getter path : String

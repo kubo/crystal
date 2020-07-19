@@ -5,13 +5,14 @@ class IO::FileDescriptor < IO
   include Crystal::System::FileDescriptor
   include IO::Buffered
 
-  # The raw file-descriptor. It is defined to be an `Int`, but its size is
-  # platform-specific.
+  # The raw file-descriptor. It is defined to be an `Int32` on unix,
+  # LibC::HANDLE on Windows.
   def fd
     @volatile_fd.get
   end
 
-  def initialize(fd, blocking = nil)
+  def initialize(fd, blocking = nil, **opts)
+    system_initialize(fd, **opts)
     @volatile_fd = Atomic.new(fd)
     @closed = system_closed?
 

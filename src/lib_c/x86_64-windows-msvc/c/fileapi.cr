@@ -30,9 +30,13 @@ lib LibC
   fun SetFileAttributesW(lpFileName : LPWSTR, dwFileAttributes : DWORD) : BOOL
   fun GetFileAttributesExW(lpFileName : LPWSTR, fInfoLevelId : GET_FILEEX_INFO_LEVELS, lpFileInformation : Void*) : BOOL
 
+  CREATE_NEW    = 1
+  CREATE_ALWAYS = 2
   OPEN_EXISTING = 3
+  OPEN_ALWAYS   = 4
 
   FILE_ATTRIBUTE_NORMAL      =       0x80
+  FILE_FLAG_OVERLAPPED       = 0x40000000
   FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
 
   FILE_SHARE_READ   = 0x1
@@ -83,4 +87,14 @@ lib LibC
 
   fun SetFileTime(hFile : HANDLE, lpCreationTime : FILETIME*,
                   lpLastAccessTime : FILETIME*, lpLastWriteTime : FILETIME*) : BOOL
+
+  fun FlushFileBuffers(hFile : HANDLE) : BOOL
+  fun GetFileSizeEx(hFile : HANDLE, lpFileSize : LARGE_INTEGER*) : BOOL
+  fun ReadFile(hFile : HANDLE, lpBuffer : Void*, nNumberOfBytesToRead : DWORD,
+               lpNumberOfBytesRead : DWORD*, lpOverlapped : OVERLAPPED*) : BOOL
+  fun SetEndOfFile(hFile : HANDLE) : BOOL
+  fun SetFilePointerEx(hFile : HANDLE, liDistanceToMove : LARGE_INTEGER,
+                       lpNewFilePointer : LARGE_INTEGER*, dwMoveMethod : DWORD) : BOOL
+  fun WriteFile(hFile : HANDLE, lpBuffer : Void*, nNumberOfBytesToWrite : DWORD,
+                lpNumberOfBytesWritten : DWORD*, lpOverlapped : OVERLAPPED*) : BOOL
 end

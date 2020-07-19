@@ -1,41 +1,97 @@
 require "c/io"
 require "c/fcntl"
 require "c/fileapi"
+require "c/ioapiset"
 require "c/sys/utime"
 require "c/sys/stat"
 require "c/winbase"
 
 module Crystal::System::File
-  def self.open(filename : String, mode : String, perm : Int32 | ::File::Permissions) : LibC::Int
+  def self.open(filename : String, mode : String, perm : Int32 | ::File::Permissions) : {LibC::HANDLE, Bool, Bool}
     perm = ::File::Permissions.new(perm) if perm.is_a? Int32
-    oflag = open_flag(mode) | LibC::O_BINARY | LibC::O_NOINHERIT
+    oflag = open_flag(mode)
+    overlapped = true
+    append = false
+
+    share = LibC::FILE_SHARE_READ | LibC::FILE_SHARE_WRITE | LibC::FILE_SHARE_DELETE
+
+    case oflag & (LibC::O_RDONLY | LibC::O_WRONLY | LibC::O_RDWR)
+    when LibC::O_RDONLY
+      access = LibC::GENERIC_READ
+    when LibC::O_WRONLY
+      access = LibC::GENERIC_WRITE
+    when LibC::O_RDWR
+      access = LibC::GENERIC_READ | LibC::GENERIC_WRITE
+    else
+      raise ::File::Error.new("Invalid file open mode '#{mode}'", file: filename)
+    end
+
+    case oflag & (LibC::O_CREAT | LibC::O_TRUNC)
+    when 0
+      create = LibC::OPEN_EXISTING
+    when LibC::O_CREAT | LibC::O_TRUNC
+      create = LibC::CREATE_ALWAYS
+    when LibC::O_CREAT
+      create = LibC::OPEN_ALWAYS
+    else
+      raise ::File::Error.new("Invalid file open mode '#{mode}'", file: filename)
+    end
+
+    if oflag & LibC::O_APPEND != 0
+      append = true
+    end
+
+    attr = LibC::FILE_FLAG_OVERLAPPED
 
     # Only the owner writable bit is used, since windows only supports
     # the read only attribute.
     if perm.owner_write?
-      perm = LibC::S_IREAD | LibC::S_IWRITE
+      attr |= LibC::FILE_ATTRIBUTE_NORMAL
     else
-      perm = LibC::S_IREAD
+      attr |= LibC::FILE_ATTRIBUTE_READONLY
     end
 
-    fd = LibC._wopen(to_windows_path(filename), oflag, perm)
-    if fd == -1
-      raise ::File::Error.from_errno("Error opening file with mode '#{mode}'", file: filename)
+    case filename
+    when "CONIN$", "CONOUT$", "CON"
+      # Consoles
+      # See https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew#consoles
+      overlapped = false # FILE_FLAG_OVERLAPPED is ignoread
+      share = LibC::FILE_SHARE_READ | LibC::FILE_SHARE_WRITE
+      create = LibC::OPEN_EXISTING
     end
 
-    fd
+    handle = LibC.CreateFileW(
+      to_windows_path(filename),
+      access,
+      share,
+      nil,
+      create,
+      attr,
+      LibC::HANDLE.null
+    )
+    if handle == LibC::INVALID_HANDLE_VALUE
+      raise ::File::Error.from_winerror("Error opening file with mode '#{mode}'", file: filename)
+    end
+    {handle, overlapped, append}
   end
 
-  def self.mktemp(prefix : String?, suffix : String?, dir : String) : {LibC::Int, String}
+  def self.mktemp(prefix : String?, suffix : String?, dir : String) : {LibC::HANDLE, String}
     path = "#{dir}#{::File::SEPARATOR}#{prefix}.#{::Random::Secure.hex}#{suffix}"
 
-    mode = LibC::O_RDWR | LibC::O_CREAT | LibC::O_EXCL | LibC::O_BINARY | LibC::O_NOINHERIT
-    fd = LibC._wopen(to_windows_path(path), mode, ::File::DEFAULT_CREATE_PERMISSIONS)
-    if fd == -1
-      raise ::File::Error.from_errno("Error creating temporary file", file: path)
+    handle = LibC.CreateFileW(
+      to_windows_path(path),
+      LibC::GENERIC_READ | LibC::GENERIC_WRITE,
+      LibC::FILE_SHARE_READ | LibC::FILE_SHARE_WRITE | LibC::FILE_SHARE_DELETE,
+      nil,
+      LibC::CREATE_NEW,
+      LibC::FILE_ATTRIBUTE_NORMAL | LibC::FILE_FLAG_OVERLAPPED,
+      LibC::HANDLE.null
+    )
+    if handle == LibC::INVALID_HANDLE_VALUE
+      raise ::File::Error.from_winerror("Error creating temporary file", file: path)
     end
 
-    {fd, path}
+    {handle, path}
   end
 
   NOT_FOUND_ERRORS = {
@@ -233,8 +289,13 @@ module Crystal::System::File
   end
 
   private def system_truncate(size : Int) : Nil
-    if LibC._chsize_s(fd, size) != 0
-      raise ::File::Error.from_errno("Error truncating file", file: path)
+    offset = uninitialized LibC::LARGE_INTEGER
+    offset.quadPart = size
+    if LibC.SetFilePointerEx(fd, offset, out _, LibC::FILE_BEGIN) == 0
+      raise ::File::Error.from_winerror("Error truncating file", file: path)
+    end
+    if LibC.SetEndOfFile(fd) == 0
+      raise ::File::Error.from_winerror("Error truncating file", file: path)
     end
   end
 
@@ -255,8 +316,8 @@ module Crystal::System::File
   end
 
   private def system_fsync(flush_metadata = true) : Nil
-    if LibC._commit(fd) != 0
-      raise IO::Error.from_errno("Error syncing file")
+    if LibC.FlushFileBuffers(fd) == 0
+      raise IO::Error.from_winerror("Error syncing file")
     end
   end
 end
