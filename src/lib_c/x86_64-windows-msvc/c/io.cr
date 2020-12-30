@@ -2,7 +2,6 @@ require "c/stdint"
 
 lib LibC
   fun _write(fd : Int, buffer : UInt8*, count : UInt) : Int
-  fun _read(fd : Int, buffer : UInt8*, count : UInt) : Int
   fun _lseeki64(fd : Int, offset : Int64, origin : Int) : Int64
   fun _isatty(fd : Int) : Int
   fun _close(fd : Int) : Int

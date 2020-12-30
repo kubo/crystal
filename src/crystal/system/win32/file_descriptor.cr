@@ -1,16 +1,64 @@
+require "fiber"
 require "c/io"
 require "c/consoleapi"
+require "c/threadpoolapiset"
+require "c/iocp"
 
 module Crystal::System::FileDescriptor
   @volatile_fd : Atomic(LibC::Int)
 
+  @[Extern]
+  struct CallbackArgument
+    property iocp : LibC::HANDLE
+    property handle : LibC::HANDLE
+    property buf : LibC::Char*
+    property buflen : UInt32
+    property overlapped : WSAOVERLAPPED*
+
+    def initialize(@iocp, @handle, @buf, @buflen, @overlapped)
+    end
+  end
+
   private def unbuffered_read(slice : Bytes)
-    bytes_read = LibC._read(fd, slice, slice.size)
-    if bytes_read == -1
-      if Errno.value == Errno::EBADF
-        raise IO::Error.new "File not open for reading"
+    event = Crystal::Event.new(::Fiber.current)
+    overlapped = event.to_unsafe
+    overlapped.internal = WinError::ERROR_TIMEOUT.to_u64
+    callback_arg = CallbackArgument.new(Thread.current.iocp, windows_handle, slice.to_unsafe, slice.size.to_u32, pointerof(overlapped))
+    callback = ->(pci : LibC::PTP_CALLBACK_INSTANCE, arg : Void*) do
+      # read() may not be available here because thread local storage, such as errno,
+      # used by C run-time functions may not be initialized in threads created by
+      # Win32 API. So ReadFile() is used here.
+      arg = arg.unsafe_as(Pointer(CallbackArgument))
+      LibC.CallbackMayRunLong(pci)
+      if LibC.ReadFile(arg.value.handle, arg.value.buf, arg.value.buflen, out bytes_read, nil) != 0
+        # Note:
+        #   overlapped.internal: The status code for the I/O request.
+        #   overlapped.internalHigh: The number of bytes transferred for the I/O request.
+        # See https://docs.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-overlapped
+        arg.value.overlapped.value.internal = 0
+        arg.value.overlapped.value.internalHigh = bytes_read.to_u64
       else
-        raise IO::Error.from_errno("Error reading file")
+        arg.value.overlapped.value.internal = LibC.GetLastError.to_u64
+        arg.value.overlapped.value.internalHigh = 0
+      end
+      LibC.PostQueuedCompletionStatus(arg.value.iocp, bytes_read, 0, arg.value.overlapped)
+    end
+    if LibC.TrySubmitThreadpoolCallback(callback, pointerof(callback_arg), nil) == 0
+      raise IO::Error.from_winerror "Error reading file"
+    end
+    event.add(24.days) # FIXME: When it is 25 days or longer, building std_spec fails with arithmetic overflow.
+    Crystal::Scheduler.reschedule
+    error = WinError.new(overlapped.internal.to_u32)
+    bytes_read = overlapped.internalHigh.to_u32
+    if error != WinError::ERROR_SUCCESS
+      if error == WinError::ERROR_ACCESS_DENIED
+        # wrong read/write mode.
+        raise IO::Error.new "File not open for reading"
+      elsif error == WinError::ERROR_BROKEN_PIPE
+        # write-side pipe is closed.
+        bytes_read = 0
+      else
+        raise IO::Error.from_winerror "Error reading file", error
       end
     end
     bytes_read

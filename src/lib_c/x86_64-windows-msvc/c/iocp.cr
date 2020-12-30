@@ -4,15 +4,17 @@ require "c/winnt"
 # See https://docs.microsoft.com/en-us/windows/win32/api/winsock2/ns-winsock2-wsaoverlapped
 @[Extern]
 struct WSAOVERLAPPED
-  internal : LibC::ULONG_PTR
-  internalHigh : LibC::ULONG_PTR
+  property internal : LibC::ULONG_PTR
+  property internalHigh : LibC::ULONG_PTR
   offset : LibC::DWORD
   offsetHigh : LibC::DWORD
   hEvent : LibC::HANDLE
   property cEvent : Void*
 
-  def initialize(crystal_event : Crystal::Event)
-    @cEvent = crystal_event.unsafe_as(Pointer(Void))
+  def initialize(fiber : Fiber)
+    @internal = 0
+    @internalHigh = 0
+    @cEvent = fiber.unsafe_as(Pointer(Void))
   end
 end
 
@@ -49,5 +51,12 @@ lib LibC
     ulNumEntriesRemoved : ULong*,
     dwMilliseconds : DWORD,
     fAlertable : BOOL
+  ) : BOOL
+
+  fun PostQueuedCompletionStatus(
+    completionPort : HANDLE,
+    dwNumberOfBytesTransferred : DWORD,
+    dwCompletionKey : ULONG_PTR,
+    lpOverlapped : WSAOVERLAPPED*
   ) : BOOL
 end

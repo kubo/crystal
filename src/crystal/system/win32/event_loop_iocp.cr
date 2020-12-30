@@ -16,7 +16,11 @@ module Crystal::EventLoop
 
         if LibC.GetQueuedCompletionStatusEx(Thread.current.iocp, io_entry, 1, out removed, sleepy_time, false)
           if removed == 1 && io_entry.first.lpOverlapped
-            next_event = io_entry.first.lpOverlapped.value.cEvent.unsafe_as(Crystal::Event)
+            fiber = io_entry.first.lpOverlapped.value.cEvent.unsafe_as(Fiber)
+            next_event = @@queue.find { |ev| ev.fiber == fiber }
+            if next_event.nil?
+              raise RuntimeError.new("Error getting the next event")
+            end
           end
         else
           raise RuntimeError.from_winerror("Error getting i/o completion status")
@@ -85,6 +89,6 @@ struct Crystal::Event
   end
 
   def to_unsafe
-    WSAOVERLAPPED.new(self)
+    WSAOVERLAPPED.new(@fiber)
   end
 end
